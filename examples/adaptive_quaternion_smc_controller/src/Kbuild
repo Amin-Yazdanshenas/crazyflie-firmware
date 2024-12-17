@@ -1,0 +1,1 @@
+obj-y += adaptive_quaternion_smc_controller.o

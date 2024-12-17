@@ -125,7 +125,7 @@
 
 // Tumble detection enabled by default
 #ifndef SUPERVISOR_TUMBLE_CHECK_ENABLE
-    #define SUPERVISOR_TUMBLE_CHECK_ENABLE true
+    #define SUPERVISOR_TUMBLE_CHECK_ENABLE false
 #endif
 
 // Landing timeout before disarming
