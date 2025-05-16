@@ -354,6 +354,9 @@ bool crtpCommanderHighLevelGetSetpoint(setpoint_t* setpoint, const state_t *stat
     setpoint->jerk.x = ev.jerk.x;
     setpoint->jerk.y = ev.jerk.y;
     setpoint->jerk.z = ev.jerk.z;
+    setpoint->snap.x = ev.snap.x;
+    setpoint->snap.y = ev.snap.y;
+    setpoint->snap.z = ev.snap.z;
 
 
     // store the last setpoint

@@ -50,7 +50,7 @@ Control of Quadrotors"
 #include "physicalConstants.h"
 #define DEBUG_MODULE "MYCONTROLLER"
 #include "debug.h"
-#include "geometric_controller.h"
+#include "robust_geometric_controller.h"
 
 #define ATTITUDE_UPDATE_RATE RATE_250_HZ
 #define ATTITUDE_UPDATE_DT (float) 1.0f/ATTITUDE_UPDATE_RATE
@@ -73,14 +73,30 @@ static float K_v_x = 2.0f;
 static float K_v_y = 2.0f;
 static float K_v_z = 4.0f;
 
+static float c_xi = 1;
+static float tau = 3;
+static float epsilon_xi = 0.001;
+static float delta_xi = 4;
 
-static float K_R_x = 421.7f;
-static float K_R_y = 421.7f;
-static float K_R_z = 273.0f;
+// static float K_R_x = 421.7f;
+// static float K_R_y = 421.7f;
+// static float K_R_z = 273.0f;
+// static float K_Omega_x = 69.27f;
+// static float K_Omega_y = 69.27f;
+// static float K_Omega_z = 68.25f;
 
-static float K_Omega_x = 69.27f;
-static float K_Omega_y = 69.27f;
-static float K_Omega_z = 68.25f;
+
+static float K_R_x = 700.0f;
+static float K_R_y = 700.0f;
+static float K_R_z = 150.0f;
+
+static float K_Omega_x = 200.0f;
+static float K_Omega_y = 200.0f;
+static float K_Omega_z = 200.0f;
+
+static float c_R = 0.001;
+static float epsilon_R = 0.001;
+static float delta_R = 0.001;
 
 // static float K_inte_R_x = 1807.2f;
 // static float K_inte_R_y = 1807.2f;
@@ -102,6 +118,10 @@ static struct mat33 J=
       {0.83e-6f, 16.6e-6f, 1.8e-6f},
       {0.72e-6f, 1.8e-6f, 29.3e-6f}}};
 
+static struct mat33 invJ=
+    {{{6.0442e4f, -0.2880e4f, -0.1308e4f},
+      {-0.2880e4f, 6.0782e4f, -0.3663e4f},
+      {-0.1308e4f, -0.3663e4f, 3.4387e4f}}};
 // static struct mat33 J=
 //     {{{16.6e-6f, 0.0f, 0.0f},
 //       {0.0f, 16.6e-6f, 0.0f},
@@ -151,6 +171,43 @@ void controllerOutOfTree(control_t *control,
     static struct vec omega_dot_d;
     static struct vec omega_d;
     static struct vec omega_e;
+
+    static struct vec j_e ;
+    static struct vec e3 ;
+    static struct vec eB ;
+    static struct vec mu_xi ;
+    static struct vec b1r ;
+    static struct vec b1r_dot ;
+    static struct vec b1r_ddot ;
+    static struct vec xi_ddot_des ;
+    static struct mat33 K_xi ;
+    static struct mat33 K_v ;
+    static struct vec kappa ;
+    static struct vec b3d ;
+    static struct vec nu  ;
+    static struct vec b2d ;
+    static struct vec b1d  ;
+    static struct vec kappa_dot ;
+    static struct vec b3d_dot;
+    static struct vec nu_dot  ;
+    static struct vec b2d_dot ;
+    static struct vec b1d_dot ;
+    static struct mat33 Rd_dot;
+    static struct vec kappa_ddot; 
+    static struct vec b3d_ddot ;
+    static struct vec nu_ddot  ;
+    static struct vec b2d_ddot ;
+    static struct vec b1d_ddot  ;
+    static struct mat33 Rd_ddot ;
+    static struct quat q_d ;
+    static struct vec R_e ;
+    static struct vec eA ;
+    static struct vec mu_R ;
+    static struct mat33 K_R  ;   
+    static struct mat33 K_Omega  ;
+
+
+
     
     struct vec omega = mkvec(
       radians(sensors->gyro.x),
@@ -185,68 +242,50 @@ void controllerOutOfTree(control_t *control,
                            state->acc.y - setpoint->acceleration.y,
                            state->acc.z - setpoint->acceleration.z);
 
-    struct vec j_e = vzero();
-    struct vec e3 = mkvec(0.0f,0.0f,1.0f);
+    j_e = vzero();
+    e3 = mkvec(0.0f,0.0f,1.0f);
+    
+    eB = vadd(v_e,vscl(c_xi/mass,xi_e));
+
+    mu_xi = vscl(((powf(delta_xi,(tau+2.0f)))*(powf(vmag(eB),tau)))/(powf(delta_xi*vmag(eB),(tau+1.0f))+powf(epsilon_xi,(tau+1.0f))), eB);
 
 
-    struct vec b1r = mkvec(cosf(psi_d),sinf(psi_d),0.0f);
-    struct vec b1r_dot = mkvec(-sinf(psi_d)*psi_dot_d,cosf(psi_d)*psi_dot_d,0.0f);
-    struct vec b1r_ddot =mkvec(-cosf(psi_d)*powf(psi_dot_d,2.0),-sinf(psi_d)*powf(psi_dot_d,2.0f),0.0f);
+    b1r = mkvec(cosf(psi_d),sinf(psi_d),0.0f);
+    b1r_dot = mkvec(-sinf(psi_d)*psi_dot_d,cosf(psi_d)*psi_dot_d,0.0f);
+    b1r_ddot =mkvec(-cosf(psi_d)*powf(psi_dot_d,2.0),-sinf(psi_d)*powf(psi_dot_d,2.0f),0.0f);
 
-    struct vec xi_ddot_des = mkvec(setpoint->acceleration.x ,setpoint->acceleration.y ,setpoint->acceleration.z );
+    xi_ddot_des = mkvec(setpoint->acceleration.x ,setpoint->acceleration.y ,setpoint->acceleration.z );
 
 
-    struct mat33 K_xi = mscl(mass,mdiag(K_xi_x,K_xi_y,K_xi_z));
-    struct mat33 K_v  = mscl(mass,mdiag(K_v_x,K_v_y,K_v_z));
+
+    K_xi = mscl(mass,mdiag(K_xi_x,K_xi_y,K_xi_z));
+    K_v  = mscl(mass,mdiag(K_v_x,K_v_y,K_v_z));
     //
-    struct vec kappa = vadd4(vneg(mvmul(K_xi,xi_e)),vneg(mvmul(K_v,v_e)),vscl(gravity*mass,e3),vscl(mass,xi_ddot_des));
+    kappa = vadd5(vneg(mvmul(K_xi,xi_e)),vneg(mvmul(K_v,v_e)),vscl(gravity*mass,e3),vscl(mass,xi_ddot_des),mu_xi);
     force = vdot(kappa,mvmul(R,e3));
-    // Trajectory generation for the attiude controller
-    // struct vec b3d = vdiv(kappa,vmag(kappa));
-    // struct vec nu  = vcross(b3d,b1r);
-    // struct vec b2d = vdiv(nu,vmag(nu));
-    // struct vec b1d  = vcross(b2d,b3d);
-    struct vec b3d = vnormalize(kappa);
-    struct vec nu  = vcross(b3d,b1r);
-    struct vec b2d = vnormalize(nu);
-    struct vec b1d  = vcross(b2d,b3d);
+    b3d = vnormalize(kappa);
+    nu  = vcross(b3d,b1r);
+    b2d = vnormalize(nu);
+    b1d  = vcross(b2d,b3d);
     Rd = mcolumns(b1d,b2d,b3d);
 
     // first derivative 
-    // struct vec xi_3dot_des = vzero();
-    // struct vec kappa_dot = vadd3(vneg(mvmul(K_xi,v_e)),vneg(mvmul(K_v,a_e)),vscl(mass,xi_3dot_des));
-    struct vec kappa_dot = vadd(vneg(mvmul(K_xi,v_e)),vneg(mvmul(K_v,a_e)));
-
-    // struct vec b3d_dot = vsub(vdiv(kappa_dot,vmag(kappa)),vdiv(vscl(vdot(kappa,kappa_dot),kappa),powf(vmag(kappa),3.0f)));
-    // struct vec nu_dot  = vadd(vcross(b3d_dot,b1r),vcross(b3d,b1r_dot));
-    // struct vec b2d_dot = vsub(vdiv(nu_dot,vmag(nu)),vdiv(vscl(vdot(nu,nu_dot),nu),powf(vmag(nu),3.0f)));
-    // struct vec b1d_dot  = vadd(vcross(b2d_dot,b3d),vcross(b2d,b3d_dot));
-    struct vec b3d_dot = vnormalize1diff(kappa,kappa_dot);
-    struct vec nu_dot  = vadd(vcross(b3d_dot,b1r),vcross(b3d,b1r_dot));
-    struct vec b2d_dot =  vnormalize1diff(nu,nu_dot);
-    struct vec b1d_dot  = vadd(vcross(b2d_dot,b3d),vcross(b2d,b3d_dot));
-    struct mat33 Rd_dot = mcolumns(b1d_dot,b2d_dot,b3d_dot);
+    kappa_dot = vadd(vneg(mvmul(K_xi,v_e)),vneg(mvmul(K_v,a_e)));
+    b3d_dot = vnormalize1diff(kappa,kappa_dot);
+    nu_dot  = vadd(vcross(b3d_dot,b1r),vcross(b3d,b1r_dot));
+    b2d_dot =  vnormalize1diff(nu,nu_dot);
+    b1d_dot  = vadd(vcross(b2d_dot,b3d),vcross(b2d,b3d_dot));
+    Rd_dot = mcolumns(b1d_dot,b2d_dot,b3d_dot);
     
 
     // second derivative 
-    // struct vec xi_4dot_des = vzero();
-    // struct vec kappa_ddot = vadd3(vneg(mvmul(K_xi,a_e)),vneg(mvmul(K_v,j_e)),vscl(mass,xi_4dot_des));
-    struct vec kappa_ddot = vadd(vneg(mvmul(K_xi,a_e)),vneg(mvmul(K_v,j_e)));
-    
-    // struct vec b3d_ddot = vadd4(vdiv(kappa_ddot,vmag(kappa)),vdiv(vscl(-2.0f*vdot(kappa,kappa_dot),kappa_dot),powf(vmag(kappa),3.0f)),
-    //                             vscl(-1.0f*(powf(vmag(kappa_dot),2.0f)+vdot(kappa,kappa_ddot))/(powf(vmag(kappa),3.0f)),kappa),
-    //                             vscl(3.0f*powf(vdot(kappa,kappa_dot),2.0f)/powf(vmag(kappa),5.0f),kappa));
-    // struct vec nu_ddot  = vadd3(vcross(b3d_ddot,b1r),vcross(b3d,b1r_ddot),vscl(2.0f,vcross(b3d_dot,b1r_dot)));
-    // struct vec b2d_ddot = vadd4(vdiv(nu_ddot,vmag(nu)),vdiv(vscl(-2.0f*vdot(nu,nu_dot),nu_dot),powf(vmag(nu),3.0f)),
-    //                             vscl(-1.0f*(powf(vmag(nu_dot),2.0f)+vdot(nu,nu_ddot))/(powf(vmag(nu),3.0f)),nu),
-    //                             vscl(3.0f*powf(vdot(nu,nu_dot),2.0f)/powf(vmag(nu),5.0f),nu));
-    // struct vec b1d_ddot  = vadd3(vcross(b2d_ddot,b3d),vcross(b2d,b3d_ddot),vscl(2.0f,vcross(b2d_dot,b3d_dot)));
-    struct vec b3d_ddot = vnormalize2diff(kappa,kappa_dot,kappa_ddot);
-    struct vec nu_ddot  = vadd3(vcross(b3d_ddot,b1r),vcross(b3d,b1r_ddot),vscl(2.0f,vcross(b3d_dot,b1r_dot)));
-    struct vec b2d_ddot = vnormalize2diff(nu,nu_dot,nu_ddot);
-    struct vec b1d_ddot  = vadd3(vcross(b2d_ddot,b3d),vcross(b2d,b3d_ddot),vscl(2.0f,vcross(b2d_dot,b3d_dot)));
+    kappa_ddot = vadd(vneg(mvmul(K_xi,a_e)),vneg(mvmul(K_v,j_e)));
+    b3d_ddot = vnormalize2diff(kappa,kappa_dot,kappa_ddot);
+    nu_ddot  = vadd3(vcross(b3d_ddot,b1r),vcross(b3d,b1r_ddot),vscl(2.0f,vcross(b3d_dot,b1r_dot)));
+    b2d_ddot = vnormalize2diff(nu,nu_dot,nu_ddot);
+    b1d_ddot  = vadd3(vcross(b2d_ddot,b3d),vcross(b2d,b3d_ddot),vscl(2.0f,vcross(b2d_dot,b3d_dot)));
 
-    struct mat33 Rd_ddot = mcolumns(b1d_ddot,b2d_ddot,b3d_ddot);
+    Rd_ddot = mcolumns(b1d_ddot,b2d_ddot,b3d_ddot);
     omega_d = mvee(mmul(mtranspose(Rd),Rd_dot));
     omega_dot_d = vsub(mvee(mmul(mtranspose(Rd),Rd_ddot)),mkvec(omega_d.y*omega_d.z,omega_d.x*omega_d.z,omega_d.y*omega_d.x));
   }
@@ -260,28 +299,30 @@ void controllerOutOfTree(control_t *control,
   } else {
 
 //  Attitude Control sliding mode control
-    // Rd = meye();
-    // omega_dot_d = vzero();
-    // omega_d= vzero();
-    // force = 0.0f;
+    Rd = meye();
+    omega_dot_d = vzero();
+    omega_d= vzero();
+    force = 0.0f;
 
-    struct quat q_d = mat2quat(Rd);
+    q_d = mat2quat(Rd);
     q_e = qqmul(qinv(q_d),attitude);
 
-    struct vec R_e = vscl(0.5f,mvee(msub(mmul(mtranspose(Rd),R),mmul(mtranspose(R),Rd))));
+    R_e = vscl(0.5f,mvee(msub(mmul(mtranspose(Rd),R),mmul(mtranspose(R),Rd))));
 
     // inte_R_e = vadd(inte_R_e,vscl(ATTITUDE_UPDATE_DT, R_e));
     omega_e = vsub(omega,mvmul(mmul(mtranspose(R),Rd),omega_d));
 
-    struct mat33 K_R      = mmul(mdiag(J.m[0][0],J.m[1][1],J.m[2][2]),mdiag(K_R_x,K_R_y,K_R_z));
-    struct mat33 K_Omega  = mmul(mdiag(J.m[0][0],J.m[1][1],J.m[2][2]),mdiag(K_Omega_x,K_Omega_y,K_Omega_z));
-    // struct mat33 K_inte_R = mmul(mdiag(J.m[0][0],J.m[1][1],J.m[2][2]),mdiag(K_inte_R_x,K_inte_R_y,K_inte_R_z));
-    // computing the Moments
-    // Moment = vadd4(vneg(mvmul(K_R,R_e)),vadd(vneg(mvmul(K_Omega,omega_e)),vneg(mvmul(K_inte_R,inte_R_e))),vcross(omega,mvmul(J,omega)),
-    //                mvmul(mneg(J),vsub(mvmul(mmul(vhat(omega),mtranspose(R)),mvmul(Rd,omega_d)), mvmul(mmul(mtranspose(R),Rd),omega_dot_d))));
+    eA = vadd(omega_e,vscl(c_R,mvmul(invJ,R_e)));
+    mu_R =vscl(((powf(delta_R,2.0f))/(delta_R*vmag(eA)+epsilon_R)),eA);
+    // mu_R = mkvec(0.0f,0.0f,0.0f);
 
-    Moment = vadd4(vneg(mvmul(K_R,R_e)),vneg(mvmul(K_Omega,omega_e)),vcross(omega,mvmul(J,omega)),
-                   mvmul(mneg(J),vsub(mvmul(mmul(vhat(omega),mtranspose(R)),mvmul(Rd,omega_d)), mvmul(mmul(mtranspose(R),Rd),omega_dot_d))));
+    K_R      = mmul(mdiag(J.m[0][0],J.m[1][1],J.m[2][2]),mdiag(K_R_x,K_R_y,K_R_z));
+    K_Omega  = mmul(mdiag(J.m[0][0],J.m[1][1],J.m[2][2]),mdiag(K_Omega_x,K_Omega_y,K_Omega_z));
+    Moment = vadd5(vneg(mvmul(K_R,R_e)),vneg(mvmul(K_Omega,omega_e)),vcross(omega,mvmul(J,omega)),
+                   mvmul(mneg(J),vsub(mvmul(mmul(vhat(omega),mtranspose(R)),mvmul(Rd,omega_d)), mvmul(mmul(mtranspose(R),Rd),omega_dot_d))),
+                  mu_R);
+
+    
     
     //updating the Force and Moments
     control->thrustSi = force;
@@ -311,6 +352,13 @@ PARAM_ADD(PARAM_FLOAT, KR_z, &K_R_z)
 PARAM_ADD(PARAM_FLOAT, KOmega_x, &K_Omega_x)
 PARAM_ADD(PARAM_FLOAT, KOmega_y, &K_Omega_y)
 PARAM_ADD(PARAM_FLOAT, KOmega_z, &K_Omega_z)
+PARAM_ADD(PARAM_FLOAT, c_xi, &c_xi)
+PARAM_ADD(PARAM_FLOAT, c_R, &c_R)
+PARAM_ADD(PARAM_FLOAT, delta_xi, &delta_xi)
+PARAM_ADD(PARAM_FLOAT, delta_R, &delta_R)
+PARAM_ADD(PARAM_FLOAT, tau, &tau)
+PARAM_ADD(PARAM_FLOAT, epsilon_xi, &epsilon_xi)
+PARAM_ADD(PARAM_FLOAT, epsilon_R, &epsilon_R)
 // PARAM_ADD(PARAM_FLOAT, KI_R_x, &K_inte_R_x)
 // PARAM_ADD(PARAM_FLOAT, KI_R_y, &K_inte_R_y)
 // PARAM_ADD(PARAM_FLOAT, KI_R_z, &K_inte_R_z)

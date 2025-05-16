@@ -1,0 +1,1 @@
+obj-y += quaternion_tsmc_controller.o

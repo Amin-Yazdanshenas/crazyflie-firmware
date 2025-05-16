@@ -121,6 +121,7 @@ struct traj_eval
 	struct vec vel;
 	struct vec acc;
 	struct vec jerk;
+	struct vec snap;
 	struct vec omega;
 	float yaw;
 };

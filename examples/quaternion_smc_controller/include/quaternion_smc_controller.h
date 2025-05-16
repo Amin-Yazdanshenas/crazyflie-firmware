@@ -139,3 +139,31 @@ static inline struct vec compute_derivative(struct vec current,struct vec prev) 
 
     return dxdt;
 }
+
+static inline struct mat33 mmul3(struct mat33 a, struct mat33 b, struct mat33 c) {
+    // First multiply a and b
+    struct mat33 ab;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            float accum = 0;
+            for (int k = 0; k < 3; ++k) {
+                accum += a.m[i][k] * b.m[k][j];
+            }
+            ab.m[i][j] = accum;
+        }
+    }
+
+    // Now multiply the result with c: (ab * c)
+    struct mat33 abc;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            float accum = 0;
+            for (int k = 0; k < 3; ++k) {
+                accum += ab.m[i][k] * c.m[k][j];
+            }
+            abc.m[i][j] = accum;
+        }
+    }
+
+    return abc;
+}
