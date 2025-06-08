@@ -2,16 +2,16 @@
  * Authored by Michael Hamer (http://www.mikehamer.info), November 2016.
  *
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
+ * it under the terms of the Gchi General Public License as published by
  * the Free Software Foundation, in version 3.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * Gchi General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the Gchi General Public License
+ * along with this program. If not, see <http://www.gchi.org/licenses/>.
  *
  * ============================================================================
  *
@@ -122,6 +122,7 @@ static float epsilon_xi_x = 0.001f;
 static float epsilon_xi_y = 0.001f;
 static float epsilon_xi_z = 0.001f;
 
+static float kh = 1.0f;
 // static float omega_scale = 1.0f;
 
 // static struct vec s_q;
@@ -224,34 +225,34 @@ void controllerOutOfTree(control_t *control,
     static struct vec rho_mvmult_s_xi ;
     static struct vec kappa ;
     static struct vec b3d ;
-    static struct vec nu  ;
+    static struct vec chi  ;
     static struct vec b2d ;
     static struct vec b1d ;
     static struct vec sdot_xi ;
     static struct mat33 Kmultrho_xi;
     static struct vec kappa_dot;
     static struct vec b3d_dot;;
-    static struct vec nu_dot ;
+    static struct vec chi_dot ;
     static struct vec b2d_dot;
     static struct vec b1d_dot  ;
     static struct mat33 Rd_dot;
     static struct vec sddot_xi ;
     static struct vec kappa_ddot;
     static struct vec b3d_ddot ;
-    static struct vec nu_ddot ;
+    static struct vec chi_ddot ;
     static struct vec b2d_ddot ;
     static struct vec b1d_ddot  ;
     static struct mat33 Rd_ddot ;
     static struct mat33 Rd;
-    static struct vec omega_dot_d;
+    static struct vec alpha_Rd;
     static struct vec omega_d;
-    static struct vec omega_dot_d_b;
-    static struct vec omega_d_b;
+    static struct vec alpha_d;
+    static struct vec omega_Rd;
     static struct vec omega_e;
     static struct mat33 Rt;
     static struct mat33 Rdt;
-    static struct mat33 omega_d_b_hat;
-    static struct mat33 neg_omega_hat;
+    static struct mat33 omega_Rd_cross;
+    static struct mat33 omega_cross;
     static struct mat33 Khat_xi_m ;
     static struct mat33 Khat_dot_xi_m ;
     static struct mat33 Khat_ddot_xi_m ;
@@ -262,9 +263,10 @@ void controllerOutOfTree(control_t *control,
     static struct mat33 rho_q ; 
     static struct quat q_e_dot ;
     static struct vec s_q ;
+    static float vh ;
     static struct mat33 Khat_q_m;
     static struct vec jerk ;
-
+    static struct vec Re3 ;
 
 
     struct vec omega = mkvec(
@@ -306,6 +308,10 @@ void controllerOutOfTree(control_t *control,
     struct vec acc = mkvec(state->acc.x ,
                            state->acc.y ,
                            state->acc.z );
+    
+    struct vec velocity = mkvec(state->velocity.x,
+                            state->velocity.y,
+                            state->velocity.z );
     // j_e = vzero();
     acc_des = mkvec(setpoint->acceleration.x ,setpoint->acceleration.y ,setpoint->acceleration.z);
     // xi_dddot_des = mkvec(setpoint->jerk.x ,setpoint->jerk.y ,setpoint->jerk.z);
@@ -338,14 +344,22 @@ void controllerOutOfTree(control_t *control,
     Khat_ddot_xi_m = mdiag(Khat_ddot_xi.x,Khat_ddot_xi.y,Khat_ddot_xi.z);
     kappa = vscl(mass,vadd4(acc_des,vneg(mvmul(lambda_xi, v_e)),vscl(gravity,e3),vneg(mvmul(Khat_xi_m,vtanhf(rho_mvmult_s_xi)))));
 
-    force = vdot(kappa,mvmul(R,e3));
+
+    Re3 = mvmul(R,e3);
+    force = vdot(kappa,Re3);
+    vh = vdot(velocity,vadd(mcolumn(R,0),mcolumn(R,1)));
+    // force = force + kh * powf(vh,2.0f);
     force = clamp(force,0.04f,0.6f);
+    
+    // kappa = vscl(force/vmag2(Re3),Re3);
+
+
 
 // Trajectory generation for the attiude controller
 
     b3d = vnormalize(kappa);
-    nu  = vcross(b3d,b1r);
-    b2d = vnormalize(nu);
+    chi  = vcross(b3d,b1r);
+    b2d = vnormalize(chi);
     b1d  = vcross(b2d,b3d);
     Rd = mcolumns(b1d,b2d,b3d);
 
@@ -361,8 +375,8 @@ void controllerOutOfTree(control_t *control,
                                 mvmul(Kmultrho_xi,veltmul(vsech2f(rho_mvmult_s_xi),sdot_xi))));
 
     b3d_dot = vnormalize1diff(kappa,kappa_dot);
-    nu_dot  = vadd(vcross(b3d_dot,b1r),vcross(b3d,b1r_dot));
-    b2d_dot =  vnormalize1diff(nu,nu_dot);
+    chi_dot  = vadd(vcross(b3d_dot,b1r),vcross(b3d,b1r_dot));
+    b2d_dot =  vnormalize1diff(chi,chi_dot);
     b1d_dot  = vadd(vcross(b2d_dot,b3d),vcross(b2d,b3d_dot));
     Rd_dot = mcolumns(b1d_dot,b2d_dot,b3d_dot);
 
@@ -382,20 +396,19 @@ void controllerOutOfTree(control_t *control,
                                                mvmul(Kdotmultrho_xi_2,sdot_xi)))));
 
     b3d_ddot = vnormalize2diff(kappa,kappa_dot,kappa_ddot);
-    nu_ddot  = vadd3(vcross(b3d_ddot,b1r),vcross(b3d,b1r_ddot),vscl(2.0f,vcross(b3d_dot,b1r_dot)));
-    b2d_ddot = vnormalize2diff(nu,nu_dot,nu_ddot);
+    chi_ddot  = vadd3(vcross(b3d_ddot,b1r),vcross(b3d,b1r_ddot),vscl(2.0f,vcross(b3d_dot,b1r_dot)));
+    b2d_ddot = vnormalize2diff(chi,chi_dot,chi_ddot);
     b1d_ddot  = vadd3(vcross(b2d_ddot,b3d),vcross(b2d,b3d_ddot),vscl(2.0f,vcross(b2d_dot,b3d_dot)));
     Rd_ddot = mcolumns(b1d_ddot,b2d_ddot,b3d_ddot);
     Rt = mtranspose(R);
     Rdt = mtranspose(Rd);
-    omega_d_b = mvee(mmul(Rdt,Rd_dot));
-    omega_d = mvmul(mmul(Rt,Rd),omega_d_b);
-    omega_d_b_hat = vhat(omega_d_b);
-    neg_omega_hat = vhat(vneg(omega));
-    // omega_dot_d = vsub(mvee(mmul(mtranspose(Rd),Rd_ddot)),mkvec(omega_d.y*omega_d.z,omega_d.x*omega_d.z,omega_d.y*omega_d.x));
-    omega_dot_d_b = mvee(msub(mmul(Rdt,Rd_ddot),mmul(omega_d_b_hat,omega_d_b_hat)));
-    omega_dot_d =  mvmul(madd(mmul3(neg_omega_hat,Rt,Rd),mmul(Rt,Rd_dot)),omega_d_b);
-    omega_dot_d = vadd(omega_dot_d, mvmul(mmul(Rt,Rd),omega_dot_d_b));
+    omega_Rd = mvee(mmul(Rdt,Rd_dot));
+    omega_d = mvmul(mmul(Rt,Rd),omega_Rd);
+    omega_Rd_cross = vhat(omega_Rd);
+    omega_cross = vhat(omega);
+    alpha_Rd = mvee(msub(mmul(Rdt,Rd_ddot),mmul(omega_Rd_cross,omega_Rd_cross)));
+    alpha_d =  mvmul(mmul(Rt,Rd),alpha_Rd);
+    alpha_d = vsub(alpha_d,mvmul(madd(mmul3(omega_cross,Rt,Rd),mmul(Rt,Rd_dot)),omega_Rd));
 
     Khat_dot_xi = mkvec(calculateKdot( Khat_xi.x,Gamma_xi_x, s_xi.x, rho_xi_x ,epsilon_xi_x, mu_xi_x,K_xi_x),
                         calculateKdot( Khat_xi.y,Gamma_xi_y, s_xi.y, rho_xi_y ,epsilon_xi_y, mu_xi_y,K_xi_y),
@@ -430,15 +443,13 @@ void controllerOutOfTree(control_t *control,
       counter ++;
     } 
     // Rd = meye();
-    omega_dot_d = vzero();
-    omega_d= vzero();
+    // alpha_d = vzero();
+    // omega_d= vzero();
     // force =0.0f;
-    // omega_d= vscl(omega_scale,omega_d);
-    // omega_dot_d = vscl(omega_scale,omega_dot_d);
-    q_d = mat2quat(Rd);
-
 
     q_d = mat2quat(Rd);
+    q_d = qnormalize(q_d);
+
 
     // creating gain matrix 
     lambda_q = mdiag(lambda_q_x,lambda_q_y,lambda_q_z);
@@ -451,18 +462,12 @@ void controllerOutOfTree(control_t *control,
 
     // computing the quaternion dot error
     q_e_dot = qscl(0.5,qqmul(q_e,mkquat(omega_e.x,omega_e.y,omega_e.z,0.0f)));
-    // q_e_dot = qscl(0.5,qqmul(q_e,mkquat(omega_e.x,omega_e.y,omega_e.z,0.0f)));
     // computing the sliding surface
     s_q = vadd(omega_e , mvmul(lambda_q, vscl(sgnplus(q_e.w),mkvec(q_e.x,q_e.y,q_e.z))));
 
     // computing the Moments
-    // Moment = vadd4(mvmul(J,omega_dot_d),
-    //                     vcross(omega,mvmul(J,omega)),
-    //                     vneg(mvmul(mmul(J,lambda_q), vscl(sgnplus(q_e.w),mkvec(q_e_dot.x,q_e_dot.y,q_e_dot.z)))),
-    //                     vneg(mvmul(mmul(J,K_q),vtanhf(vscl(rho_q,s_q)))));
-
     Khat_q_m = mdiag(Khat_q.x,Khat_q.y,Khat_q.z);  
-    Moment = vadd4(mvmul(J,omega_dot_d),
+    Moment = vadd4(mvmul(J,alpha_d),
                    vcross(omega,mvmul(J,omega)),
                    vneg(mvmul(mmul(J,lambda_q), vscl(sgnplus(q_e.w),mkvec(q_e_dot.x,q_e_dot.y,q_e_dot.z)))),
                    vneg(mvmul(mmul(J,Khat_q_m),vtanhf(mvmul(rho_q,s_q)))));
@@ -541,6 +546,7 @@ PARAM_ADD(PARAM_FLOAT, epsilon_pos_z, &epsilon_xi_z)
 PARAM_ADD(PARAM_FLOAT, K_pos_upper_x, &K_xi_upper_x)
 PARAM_ADD(PARAM_FLOAT, K_pos_upper_y, &K_xi_upper_y)
 PARAM_ADD(PARAM_FLOAT, K_pos_upper_z, &K_xi_upper_z)
+PARAM_ADD(PARAM_FLOAT, kh, &kh)
 
 PARAM_ADD(PARAM_FLOAT, isInit, &isInit)
 // PARAM_ADD(PARAM_FLOAT, omega_scale, &omega_scale)

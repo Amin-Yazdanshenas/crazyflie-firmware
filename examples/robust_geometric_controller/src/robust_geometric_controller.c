@@ -339,7 +339,7 @@ bool controllerOutOfTreeTest(void) {
 }
 
 // Parameter setup
-PARAM_GROUP_START(ctrlGeo)
+PARAM_GROUP_START(ctrlRGTC)
 PARAM_ADD(PARAM_FLOAT, Kx_x, &K_xi_x)
 PARAM_ADD(PARAM_FLOAT, Kx_y, &K_xi_y)
 PARAM_ADD(PARAM_FLOAT, Kx_z, &K_xi_z)
@@ -362,7 +362,7 @@ PARAM_ADD(PARAM_FLOAT, epsilon_R, &epsilon_R)
 // PARAM_ADD(PARAM_FLOAT, KI_R_x, &K_inte_R_x)
 // PARAM_ADD(PARAM_FLOAT, KI_R_y, &K_inte_R_y)
 // PARAM_ADD(PARAM_FLOAT, KI_R_z, &K_inte_R_z)
-PARAM_GROUP_STOP(ctrlGeo)
+PARAM_GROUP_STOP(ctrlRGTC)
 
 
 // Logging info setup
